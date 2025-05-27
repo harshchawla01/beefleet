@@ -3,6 +3,8 @@ package org.beefleet.controller;
 import org.beefleet.dto.DeliveryRequest;
 import org.beefleet.dto.DeliveryResponse;
 import org.beefleet.dto.DeliveryStatusResponse;
+import org.beefleet.exception.VendorNotFoundException;
+import org.beefleet.repository.DeliveryRepository;
 import org.beefleet.service.VendorDeliveryService;
 import org.beefleet.service.impl.AmazonVendorDeliveryService;
 import org.beefleet.service.impl.FlipkartVendorDeliveryService;
@@ -39,7 +41,7 @@ public class VendorDeliveryController {
             vendorDeliveryService = flipkartVendorDeliveryService;
         }
         else {
-            return new ResponseEntity<>("Invalid vendor", HttpStatus.BAD_REQUEST);
+            throw new VendorNotFoundException("Vendor '" + username + "' is not registered.");
         }
 
         DeliveryResponse res = vendorDeliveryService.scheduleDelivery(req);
@@ -61,7 +63,7 @@ public class VendorDeliveryController {
             return new ResponseEntity<>("Invalid vendor", HttpStatus.BAD_REQUEST);
         }
 
-        DeliveryStatusResponse res = vendorDeliveryService.getDeliveryStatus(deliveryId);
+        DeliveryStatusResponse res = vendorDeliveryService.getDeliveryStatus(deliveryId, username);
         return new ResponseEntity<>(res, HttpStatus.OK);
     }
 }

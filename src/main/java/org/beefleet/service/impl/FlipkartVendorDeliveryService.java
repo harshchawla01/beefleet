@@ -1,34 +1,11 @@
-//package org.beefleet.service.impl;
-//
-//import org.beefleet.dto.DeliveryRequest;
-//import org.beefleet.dto.DeliveryResponse;
-//import org.beefleet.dto.DeliveryStatusResponse;
-//import org.beefleet.service.VendorDeliveryService;
-//import org.springframework.stereotype.Service;
-//
-//@Service
-//public class FlipkartVendorDeliveryService implements VendorDeliveryService {
-//    @Override
-//    public DeliveryResponse scheduleDelivery(DeliveryRequest req) {
-//        return null;
-//    }
-//
-//    @Override
-//    public DeliveryStatusResponse getDeliveryStatus(Long deliveryId) {
-//        return null;
-//    }
-//
-//    @Override
-//    public DeliveryResponse retryFailedDelivery(Long deliveryId) {
-//        return null;
-//    }
-//}
-
 package org.beefleet.service.impl;
 
 import org.beefleet.dto.DeliveryRequest;
 import org.beefleet.dto.DeliveryResponse;
 import org.beefleet.dto.DeliveryStatusResponse;
+import org.beefleet.dto.RetryResponse;
+import org.beefleet.exception.DeliveryNotFoundException;
+import org.beefleet.exception.UnauthorizedAccessException;
 import org.beefleet.model.Delivery;
 import org.beefleet.model.DeliveryStatus;
 import org.beefleet.repository.DeliveryRepository;
@@ -41,9 +18,6 @@ import java.time.LocalDateTime;
 
 @Service
 public class FlipkartVendorDeliveryService implements VendorDeliveryService {
-
-    @Autowired
-    private VendorRepository vendorRepository;
 
     @Autowired
     private DeliveryRepository deliveryRepository;
@@ -59,7 +33,7 @@ public class FlipkartVendorDeliveryService implements VendorDeliveryService {
         delivery.setPackageWeightKg(req.getPackageWeightKg());
         delivery.setScheduledAt(LocalDateTime.now());
         delivery.setEstimatedDeliveryTime(LocalDateTime.now().plusDays(2)); // 48 hours delivery
-        delivery.setStatus(DeliveryStatus.SCHEDULED);
+        delivery.setStatus(DeliveryStatus.FAILED);
         delivery.setMessage("Delivery scheduled successfully. Will be delivered in 48 hours.");
 
         delivery = deliveryRepository.save(delivery);
@@ -76,9 +50,13 @@ public class FlipkartVendorDeliveryService implements VendorDeliveryService {
     }
 
     @Override
-    public DeliveryStatusResponse getDeliveryStatus(Long deliveryId) {
+    public DeliveryStatusResponse getDeliveryStatus(Long deliveryId, String username) {
         Delivery delivery = deliveryRepository.findById(deliveryId)
-                .orElseThrow(() -> new RuntimeException("Delivery not found with id: " + deliveryId));
+                .orElseThrow(() -> new DeliveryNotFoundException("No delivery found with given ID"));
+
+        if (!delivery.getVendorName().equals(username)) {
+            throw new UnauthorizedAccessException("You are not authorized to view this delivery.");
+        }
 
         DeliveryStatusResponse response = new DeliveryStatusResponse();
         response.setDeliveryId(delivery.getDeliveryId());
@@ -94,7 +72,25 @@ public class FlipkartVendorDeliveryService implements VendorDeliveryService {
     }
 
     @Override
-    public DeliveryResponse retryFailedDelivery(Long deliveryId) {
-        return null;
+    public RetryResponse retryFailedDelivery(Long deliveryId) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new DeliveryNotFoundException("No delivery found with given ID"));
+
+        if (delivery.getStatus() != DeliveryStatus.FAILED) {
+            throw new RuntimeException("Only failed deliveries can be retried");
+        }
+
+        delivery.setStatus(DeliveryStatus.CANCELLED);
+        delivery.setMessage("Order automatically cancelled as per Flipkart policy.");
+
+        delivery = deliveryRepository.save(delivery);
+
+        RetryResponse response = new RetryResponse();
+        response.setDeliveryId(delivery.getDeliveryId());
+        response.setStatus(delivery.getStatus().toString());
+        response.setVendorName(delivery.getVendorName());
+        response.setMessage(delivery.getMessage());
+
+        return response;
     }
 }

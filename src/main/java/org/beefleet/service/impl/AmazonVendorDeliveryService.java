@@ -1,64 +1,11 @@
-//package org.beefleet.service.impl;
-//
-//import org.beefleet.dto.DeliveryRequest;
-//import org.beefleet.dto.DeliveryResponse;
-//import org.beefleet.dto.DeliveryStatusResponse;
-//import org.beefleet.model.Delivery;
-//import org.beefleet.model.DeliveryStatus;
-//import org.beefleet.repository.DeliveryRepository;
-//import org.beefleet.repository.VendorRepository;
-//import org.beefleet.service.VendorDeliveryService;
-//import org.springframework.beans.factory.annotation.Autowired;
-//import org.springframework.stereotype.Service;
-//
-//import java.time.LocalDateTime;
-//
-//@Service
-//public class AmazonVendorDeliveryService implements VendorDeliveryService {
-//
-//    @Autowired
-//    private VendorRepository vendorRepository;
-//
-//    @Autowired
-//    private DeliveryRepository deliveryRepository;
-//
-//    @Override
-//    public DeliveryResponse scheduleDelivery(DeliveryRequest req) {
-//        String vendorName = req.getVendorName();
-//        Delivery del = deliveryRepository.findByCustomerName(req.getCustomerName());
-//
-//        del.setScheduledAt(LocalDateTime.now());
-//        del.setEstimatedDeliveryTime(LocalDateTime.now().plusDays(1));
-//        del.setStatus(DeliveryStatus.valueOf("SCHEDULED"));
-//        del.setVendorName(req.getVendorName());
-//        del.setDeliveryId(req.getDeliveryId());
-//        del.setMessage("Will deliver within a day");
-//        DeliveryResponse res = Delivery.builder()
-//                .deliveryId(del.getDeliveryId())
-//                .scheduledAt(del.getScheduledAt())
-//
-//                        .build();
-//        vendorRepository.save();
-//        return res;
-//    }
-//
-//    @Override
-//    public DeliveryStatusResponse getDeliveryStatus(Long deliveryId) {
-//        return null;
-//    }
-//
-//    @Override
-//    public DeliveryResponse retryFailedDelivery(Long deliveryId) {
-//        return null;
-//    }
-//}
-
-
 package org.beefleet.service.impl;
 
 import org.beefleet.dto.DeliveryRequest;
 import org.beefleet.dto.DeliveryResponse;
 import org.beefleet.dto.DeliveryStatusResponse;
+import org.beefleet.dto.RetryResponse;
+import org.beefleet.exception.DeliveryNotFoundException;
+import org.beefleet.exception.UnauthorizedAccessException;
 import org.beefleet.model.Delivery;
 import org.beefleet.model.DeliveryStatus;
 import org.beefleet.repository.DeliveryRepository;
@@ -71,9 +18,6 @@ import java.time.LocalDateTime;
 
 @Service
 public class AmazonVendorDeliveryService implements VendorDeliveryService {
-
-    @Autowired
-    private VendorRepository vendorRepository;
 
     @Autowired
     private DeliveryRepository deliveryRepository;
@@ -89,7 +33,7 @@ public class AmazonVendorDeliveryService implements VendorDeliveryService {
         delivery.setPackageWeightKg(req.getPackageWeightKg());
         delivery.setScheduledAt(LocalDateTime.now());
         delivery.setEstimatedDeliveryTime(LocalDateTime.now().plusDays(1)); // 24 hours delivery
-        delivery.setStatus(DeliveryStatus.SCHEDULED);
+        delivery.setStatus(DeliveryStatus.FAILED);
         delivery.setMessage("Will deliver within a day");
 
         // Save delivery
@@ -108,9 +52,15 @@ public class AmazonVendorDeliveryService implements VendorDeliveryService {
     }
 
     @Override
-    public DeliveryStatusResponse getDeliveryStatus(Long deliveryId) {
+    public DeliveryStatusResponse getDeliveryStatus(Long deliveryId, String username) {
+        // First check if delivery exists
         Delivery delivery = deliveryRepository.findById(deliveryId)
-                .orElseThrow(() -> new RuntimeException("Delivery not found with id: " + deliveryId));
+                .orElseThrow(() -> new DeliveryNotFoundException("No delivery found with given ID"));
+
+        // Then check authorization - if username doesn't match userId, throw unauthorized
+        if (!delivery.getVendorName().equals(username)) {
+            throw new UnauthorizedAccessException("You are not authorized to view this delivery.");
+        }
 
         DeliveryStatusResponse response = new DeliveryStatusResponse();
         response.setDeliveryId(delivery.getDeliveryId());
@@ -126,7 +76,33 @@ public class AmazonVendorDeliveryService implements VendorDeliveryService {
     }
 
     @Override
-    public DeliveryResponse retryFailedDelivery(Long deliveryId) {
-        return null;
+    public RetryResponse retryFailedDelivery(Long deliveryId) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new DeliveryNotFoundException("No delivery found with given ID"));
+
+        if (delivery.getStatus() != DeliveryStatus.FAILED) {
+            throw new RuntimeException("Only failed deliveries can be retried");
+        }
+
+        if (delivery.getRetryCount() >= 3) {
+            delivery.setStatus(DeliveryStatus.CANCELLED);
+            delivery.setMessage("Maximum retry attempts reached. Delivery cancelled.");
+        } else {
+            delivery.setRetryCount(delivery.getRetryCount() + 1);
+//            delivery.setStatus(DeliveryStatus.RETRY_INITIATED);
+            delivery.setStatus(DeliveryStatus.FAILED);
+            delivery.setEstimatedDeliveryTime(LocalDateTime.now().plusDays(1));
+            delivery.setMessage("Retry successfully triggered.");
+        }
+
+        delivery = deliveryRepository.save(delivery);
+
+        RetryResponse response = new RetryResponse();
+        response.setDeliveryId(delivery.getDeliveryId());
+        response.setStatus(delivery.getStatus().toString());
+        response.setVendorName(delivery.getVendorName());
+        response.setMessage(delivery.getMessage());
+
+        return response;
     }
 }
